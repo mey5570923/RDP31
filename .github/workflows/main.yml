@@ -1,0 +1,80 @@
+name: Windows-10-Pro-RDP
+
+on:
+  workflow_dispatch: # Menjalankan secara manual dari tab Actions
+
+jobs:
+  rdp-session:
+    runs-on: windows-latest
+    timeout-minutes: 360 # Batas maksimal GitHub (6 jam)
+
+    steps:
+      - name: 1. Konfigurasi Sistem (Windows Pro Optimization)
+        shell: powershell
+        run: |
+          # Mengaktifkan Remote Desktop
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          
+          # Optimasi Performa (Mematikan fitur server yang tidak perlu)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "ColorDepth" -Value 4
+          Restart-Service -Name TermService -Force
+          Write-Host "✅ Sistem Siap untuk Akses Pro"
+
+      - name: 2. Setup Pengguna Admin RDP
+        shell: powershell
+        run: |
+          $username = "AdminPro"
+          # Membuat password acak yang kuat
+          $password = -join ((33..126) | Get-Random -Count 20 | % {[char]$_})
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          
+          # Membuat user lokal baru
+          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -Description "Akses RDP Windows Pro"
+          Add-LocalGroupMember -Group "Administrators" -Member $username
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
+          
+          # Simpan ke env GitHub
+          echo "RDP_USER=$username" >> $env:GITHUB_ENV
+          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+
+      - name: 3. Instalasi & Koneksi Tailscale
+        shell: powershell
+        run: |
+          # Download Installer
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $out = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $url -OutFile $out
+          
+          # Silent Install
+          Start-Process msiexec.exe -ArgumentList "/i $out /quiet /norestart" -Wait
+          
+          # Menghubungkan ke Tailscale Network
+          # Gunakan TAILSCALE_AUTH_KEY di Secrets Actions Anda
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=windows-pro-vps
+          
+          # Ambil IP Tailscale
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TS_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: 4. Informasi Detail Koneksi
+        shell: powershell
+        run: |
+          Write-Host "`n==========================================" -ForegroundColor Cyan
+          Write-Host "🚀 RDP WINDOWS PRO SIAP DIGUNAKAN" -ForegroundColor Cyan
+          Write-Host "=========================================="
+          Write-Host "IP Address (Tailscale) : $env:TS_IP" -ForegroundColor Yellow
+          Write-Host "Username               : $env:RDP_USER" -ForegroundColor Yellow
+          Write-Host "Password               : $env:RDP_PASS" -ForegroundColor Yellow
+          Write-Host "=========================================="
+          Write-Host "Tips: Gunakan aplikasi 'Remote Desktop Connection' di PC Anda."
+          Write-Host "`n"
+
+      - name: 5. Menjaga Sesi (Keep Alive)
+        shell: powershell
+        run: |
+          $timer = [diagnostics.stopwatch]::StartNew()
+          while ($timer.Elapsed.TotalMinutes -lt 360) {
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Sesi Berjalan - CPU & RAM Stabil..."
+            Start-Sleep -Seconds 300
+          }
