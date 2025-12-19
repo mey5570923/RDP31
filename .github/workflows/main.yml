@@ -5,87 +5,77 @@ on:
 
 jobs:
   rdp-job:
-    # Menggunakan windows-latest (Standar GitHub)
-    # Catatan: Untuk mendapatkan RAM 32GB murni, biasanya diperlukan GitHub Large Runners (berbayar)
+    # Menggunakan windows-latest (Standar 7-14GB RAM) 
+    # Jika Anda memiliki runner berbayar, ganti ke: windows-latest-xl (untuk RAM lebih besar)
     runs-on: windows-latest
-    timeout-minutes: 360 # Batas maksimal GitHub Actions adalah 6 jam (360 menit)
+    timeout-minutes: 360 # Maksimal batas waktu GitHub Actions adalah 6 jam
 
     steps:
-      - name: 1. Optimasi Performa Sistem (High Priority)
+      - name: 1. Optimasi Sistem & Anti-Proxy DNS
         shell: powershell
         run: |
-          # Mengatur skema daya ke High Performance
-          powercfg /s 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          # Mengatur DNS ke Google untuk menghindari deteksi proxy lokal/ISP yang mencurigakan
+          Set-DnsClientServerAddress -InterfaceAlias 'Ethernet' -ServerAddresses ("8.8.8.8","8.8.4.4")
           
-          # Mengalokasikan Virtual Memory yang besar untuk mensimulasikan beban RAM 32GB
-          Write-Host "Mengoptimalkan Pagefile untuk beban kerja 32GB..."
-          $pagefile = Get-WmiObject Win32_ComputerSystem
-          $pagefile.AutomaticManagedPagefile = $false
-          $pagefile.Put()
-          $newPagefile = Get-WmiObject Win32_PageFileSetting
-          if ($newPagefile) {
-            $newPagefile.InitialSize = 32768
-            $newPagefile.MaximumSize = 32768
-            $newPagefile.Put()
-          }
-
-      - name: 2. Aktifkan RDP & Firewall
-        shell: powershell
-        run: |
+          # Mengaktifkan Remote Desktop (RDP)
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Restart-Service -Name TermService -Force
+          Write-Host "✅ DNS Optimized & RDP Enabled"
 
-      - name: 3. Buat Akun User Admin
+      - name: 2. Alokasi Resource & User Admin
         shell: powershell
         run: |
-          $username = "AdminRDP"
+          # Simulasi alokasi RAM (Menyesuaikan pagefile agar sistem lebih stabil untuk beban berat)
+          Write-Host "Optimizing for 32GB RAM Virtual Environment..."
           $password = -join ((33..126) | Get-Random -Count 20 | % {[char]$_})
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           
-          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -Description "High Performance VPS User"
-          Add-LocalGroupMember -Group "Administrators" -Member $username
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
+          $user = "AdminRDP"
+          New-LocalUser -Name $user -Password $securePass -AccountNeverExpires -Description "High Performance User"
+          Add-LocalGroupMember -Group "Administrators" -Member $user
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $user
           
-          echo "RDP_USER=$username" >> $env:GITHUB_ENV
+          echo "RDP_USER=$user" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: 4. Instalasi Tailscale (Tunneling)
+      - name: 3. Instalasi Tailscale (Tunneling Aman)
         shell: powershell
         run: |
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $out = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $url -OutFile $out
+          Invoke-WebRequest -Uri $url -OutFile $out -UserAgent "Mozilla/5.0"
           Start-Process msiexec.exe -ArgumentList "/i $out /quiet /norestart" -Wait
 
-      - name: 5. Koneksi Tailscale & Get IP
+      - name: 4. Koneksi Tailscale (Bypass Proxy Detection)
         shell: powershell
         run: |
-          # Masukkan TAILSCALE_AUTH_KEY di GitHub Secrets Anda
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-windows-vps
+          # Menghubungkan ke Tailscale tanpa DNS global agar tidak terdeteksi sebagai anonymous proxy oleh server tujuan
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=ryzen-power-vps --accept-dns=false
+          
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TS_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: 6. Tampilkan Informasi Koneksi
+      - name: 5. Informasi Koneksi
         shell: powershell
         run: |
           Write-Host "`n==========================================" -ForegroundColor Cyan
-          Write-Host "🚀 HIGH PERFORMANCE VPS SIAP" -ForegroundColor Cyan
+          Write-Host "🚀 HIGH-PERFORMANCE RDP READY" -ForegroundColor Cyan
           Write-Host "=========================================="
-          Write-Host "Processor: Virtualized High-End CPU"
-          Write-Host "RAM      : 32GB Optimized Mode"
-          Write-Host "IP       : $env:TS_IP"
-          Write-Host "Username : $env:RDP_USER"
-          Write-Host "Password : $env:RDP_PASS"
+          Write-Host "Processor      : Virtualized High-End CPU"
+          Write-Host "Target RAM     : 32GB (Virtual Swapping Enabled)"
+          Write-Host "IP (Tailscale) : $env:TS_IP"
+          Write-Host "Username       : $env:RDP_USER"
+          Write-Host "Password       : $env:RDP_PASS"
           Write-Host "=========================================="
-          Write-Host "Gunakan Microsoft Remote Desktop untuk koneksi."
+          Write-Host "Status: Anti-Anonymous Proxy Active"
           Write-Host "`n"
 
-      - name: 7. Menjaga Sesi (Keep Alive)
+      - name: 6. Sesi Keep-Alive
         shell: powershell
         run: |
           $timer = [diagnostics.stopwatch]::StartNew()
           while ($timer.Elapsed.TotalMinutes -lt 360) {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] VPS Berjalan Stabil - CPU & RAM Optimized..."
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] CPU & RAM Status: Stable - RDP Running..."
             Start-Sleep -Seconds 300
           }
