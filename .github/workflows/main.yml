@@ -1,4 +1,4 @@
-name: Windows-RDP-Fast-Connection
+name: Windows-RDP-High-Performance
 
 on:
   workflow_dispatch: # Menjalankan secara manual
@@ -6,80 +6,80 @@ on:
 jobs:
   rdp-session:
     runs-on: windows-latest
-    timeout-minutes: 360 # Batas maksimal aman GitHub adalah 6 jam
+    timeout-minutes: 360 # Batas maksimal GitHub Actions adalah 6 jam (360 menit)
 
     steps:
-      - name: 1. Konfigurasi Sistem & Firewall
+      - name: 1. Inisialisasi Sistem & RDP
         shell: powershell
         run: |
-          # Mengaktifkan RDP di Registry
+          # Mengaktifkan Remote Desktop
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          # Mengizinkan lalu lintas RDP melalui Windows Firewall
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          # Mengatur DNS agar lebih stabil dan menghindari deteksi proxy/blokir
-          Set-DnsClientServerAddress -InterfaceAlias 'Ethernet' -ServerAddresses ("8.8.8.8","8.8.4.4")
+          # Mengoptimalkan performa visual untuk koneksi lambat
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "ColorDepth" -Value 4
           Restart-Service -Name TermService -Force
+          Write-Host "✅ RDP Berhasil Diaktifkan"
 
-      - name: 2. Setup Pengguna Admin RDP
+      - name: 2. Setup Akun User Admin
         shell: powershell
         run: |
           $username = "RDP_User"
-          # Membuat password acak yang kuat (20 karakter)
+          # Membuat password acak yang kuat
           $password = -join ((33..126) | Get-Random -Count 20 | % {[char]$_})
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           
-          # Membuat akun lokal
+          # Membuat User Baru
           New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -Description "Akses RDP"
           Add-LocalGroupMember -Group "Administrators" -Member $username
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
           
-          # Export variabel ke lingkungan GitHub
+          # Simpan informasi ke environment
           echo "RDP_USER=$username" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+          Write-Host "✅ User Admin Berhasil Dibuat"
 
-      - name: 3. Instalasi Tailscale (Tunneling)
+      - name: 3. Instalasi Tailscale (VPN Tunnel)
         shell: powershell
         run: |
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $out = "$env:TEMP\tailscale.msi"
-          # Mendownload dengan User-Agent standar untuk menghindari blokir
-          Invoke-WebRequest -Uri $url -OutFile $out -UserAgent "Mozilla/5.0"
-          
-          # Instalasi silent
+          Invoke-WebRequest -Uri $url -OutFile $out
+          # Instalasi tanpa interaksi
           Start-Process msiexec.exe -ArgumentList "/i $out /quiet /norestart" -Wait
 
       - name: 4. Menghubungkan Network Tailscale
         shell: powershell
         run: |
-          # Menghubungkan ke jaringan Tailscale menggunakan Auth Key dari Secrets
-          # Pastikan Anda telah menambahkan TAILSCALE_AUTH_KEY di GitHub Secrets
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-vps-windows --accept-dns=false
+          # Menghubungkan menggunakan Auth Key (Ambil dari GitHub Secrets)
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-windows-vps
           
-          # Mendapatkan alamat IP Tailscale
+          # Ambil IP Tailscale untuk koneksi
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TS_IP=$ip" >> $env:GITHUB_ENV
+          Write-Host "✅ Tunneling Tailscale Aktif"
 
       - name: 5. Informasi Login RDP
         shell: powershell
         run: |
-          Write-Host "`n"
-          Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host "📡 KONEKSI RDP BERHASIL DISIAPKAN" -ForegroundColor Cyan
+          Write-Host "`n==========================================" -ForegroundColor Cyan
+          Write-Host "🚀 DETAIL KONEKSI VPS WINDOWS" -ForegroundColor Cyan
           Write-Host "==========================================" -ForegroundColor Cyan
           Write-Host "IP Address (Tailscale) : $env:TS_IP" -ForegroundColor Yellow
           Write-Host "Username               : $env:RDP_USER" -ForegroundColor Yellow
           Write-Host "Password               : $env:RDP_PASS" -ForegroundColor Yellow
           Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host "Gunakan aplikasi Remote Desktop di perangkat Anda."
-          Write-Host "Perangkat Anda WAJIB terhubung ke akun Tailscale yang sama."
+          Write-Host "Gunakan Microsoft Remote Desktop untuk login."
+          Write-Host "Pastikan PC Anda juga terhubung ke Tailscale."
           Write-Host "`n"
 
       - name: 6. Menjaga Sesi (Keep Alive)
         shell: powershell
         run: |
-          Write-Host "Sesi VPS dimulai. Menunggu koneksi..."
-          $timer = [diagnostics.stopwatch]::StartNew()
-          while ($timer.Elapsed.TotalMinutes -lt 360) {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Sesi Tetap Aktif..."
-            Start-Sleep -Seconds 300 # Update log setiap 5 menit
+          $startTime = Get-Date
+          Write-Host "Sesi Aktif Dimulai: $startTime"
+          # Menampilkan status setiap 5 menit agar workflow tidak dianggap idle
+          while ($true) {
+            $elapsed = (Get-Date) - $startTime
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Durasi Berjalan: $($elapsed.ToString('hh\:mm\:ss'))"
+            Start-Sleep -Seconds 300
           }
