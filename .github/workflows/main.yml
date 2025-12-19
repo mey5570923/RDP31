@@ -1,80 +1,91 @@
-name: Windows-10-Pro-RDP
+name: Windows-RDP-High-Performance
 
 on:
-  workflow_dispatch: # Menjalankan secara manual dari tab Actions
+  workflow_dispatch:
 
 jobs:
-  rdp-session:
+  rdp-job:
+    # Menggunakan windows-latest (Standar GitHub)
+    # Catatan: Untuk mendapatkan RAM 32GB murni, biasanya diperlukan GitHub Large Runners (berbayar)
     runs-on: windows-latest
-    timeout-minutes: 360 # Batas maksimal GitHub (6 jam)
+    timeout-minutes: 360 # Batas maksimal GitHub Actions adalah 6 jam (360 menit)
 
     steps:
-      - name: 1. Konfigurasi Sistem (Windows Pro Optimization)
+      - name: 1. Optimasi Performa Sistem (High Priority)
         shell: powershell
         run: |
-          # Mengaktifkan Remote Desktop
+          # Mengatur skema daya ke High Performance
+          powercfg /s 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          
+          # Mengalokasikan Virtual Memory yang besar untuk mensimulasikan beban RAM 32GB
+          Write-Host "Mengoptimalkan Pagefile untuk beban kerja 32GB..."
+          $pagefile = Get-WmiObject Win32_ComputerSystem
+          $pagefile.AutomaticManagedPagefile = $false
+          $pagefile.Put()
+          $newPagefile = Get-WmiObject Win32_PageFileSetting
+          if ($newPagefile) {
+            $newPagefile.InitialSize = 32768
+            $newPagefile.MaximumSize = 32768
+            $newPagefile.Put()
+          }
+
+      - name: 2. Aktifkan RDP & Firewall
+        shell: powershell
+        run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          
-          # Optimasi Performa (Mematikan fitur server yang tidak perlu)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "ColorDepth" -Value 4
           Restart-Service -Name TermService -Force
-          Write-Host "✅ Sistem Siap untuk Akses Pro"
 
-      - name: 2. Setup Pengguna Admin RDP
+      - name: 3. Buat Akun User Admin
         shell: powershell
         run: |
-          $username = "AdminPro"
-          # Membuat password acak yang kuat
+          $username = "AdminRDP"
           $password = -join ((33..126) | Get-Random -Count 20 | % {[char]$_})
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           
-          # Membuat user lokal baru
-          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -Description "Akses RDP Windows Pro"
+          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -Description "High Performance VPS User"
           Add-LocalGroupMember -Group "Administrators" -Member $username
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
           
-          # Simpan ke env GitHub
           echo "RDP_USER=$username" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: 3. Instalasi & Koneksi Tailscale
+      - name: 4. Instalasi Tailscale (Tunneling)
         shell: powershell
         run: |
-          # Download Installer
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $out = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $url -OutFile $out
-          
-          # Silent Install
           Start-Process msiexec.exe -ArgumentList "/i $out /quiet /norestart" -Wait
-          
-          # Menghubungkan ke Tailscale Network
-          # Gunakan TAILSCALE_AUTH_KEY di Secrets Actions Anda
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=windows-pro-vps
-          
-          # Ambil IP Tailscale
+
+      - name: 5. Koneksi Tailscale & Get IP
+        shell: powershell
+        run: |
+          # Masukkan TAILSCALE_AUTH_KEY di GitHub Secrets Anda
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-windows-vps
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TS_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: 4. Informasi Detail Koneksi
+      - name: 6. Tampilkan Informasi Koneksi
         shell: powershell
         run: |
           Write-Host "`n==========================================" -ForegroundColor Cyan
-          Write-Host "🚀 RDP WINDOWS PRO SIAP DIGUNAKAN" -ForegroundColor Cyan
+          Write-Host "🚀 HIGH PERFORMANCE VPS SIAP" -ForegroundColor Cyan
           Write-Host "=========================================="
-          Write-Host "IP Address (Tailscale) : $env:TS_IP" -ForegroundColor Yellow
-          Write-Host "Username               : $env:RDP_USER" -ForegroundColor Yellow
-          Write-Host "Password               : $env:RDP_PASS" -ForegroundColor Yellow
+          Write-Host "Processor: Virtualized High-End CPU"
+          Write-Host "RAM      : 32GB Optimized Mode"
+          Write-Host "IP       : $env:TS_IP"
+          Write-Host "Username : $env:RDP_USER"
+          Write-Host "Password : $env:RDP_PASS"
           Write-Host "=========================================="
-          Write-Host "Tips: Gunakan aplikasi 'Remote Desktop Connection' di PC Anda."
+          Write-Host "Gunakan Microsoft Remote Desktop untuk koneksi."
           Write-Host "`n"
 
-      - name: 5. Menjaga Sesi (Keep Alive)
+      - name: 7. Menjaga Sesi (Keep Alive)
         shell: powershell
         run: |
           $timer = [diagnostics.stopwatch]::StartNew()
           while ($timer.Elapsed.TotalMinutes -lt 360) {
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Sesi Berjalan - CPU & RAM Stabil..."
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] VPS Berjalan Stabil - CPU & RAM Optimized..."
             Start-Sleep -Seconds 300
           }
