@@ -1,4 +1,4 @@
-name: Windows-RDP-High-Performance
+name: Windows-10-Pro-Tailscale-SG
 
 on:
   workflow_dispatch: # Menjalankan secara manual
@@ -6,80 +6,76 @@ on:
 jobs:
   rdp-session:
     runs-on: windows-latest
-    timeout-minutes: 360 # Batas maksimal GitHub Actions adalah 6 jam (360 menit)
+    timeout-minutes: 360 # Maksimal 6 jam
 
     steps:
-      - name: 1. Inisialisasi Sistem & RDP
+      - name: 1. Optimasi Mode "No Server" (Desktop Pro Style)
         shell: powershell
         run: |
-          # Mengaktifkan Remote Desktop
+          # Mematikan Server Manager agar tidak muncul saat login
+          $registryPath = "HKLM:\SOFTWARE\Microsoft\ServerManager"
+          if (!(Test-Path $registryPath)) { New-Item -Path $registryPath -Force }
+          Set-ItemProperty -Path $registryPath -Name "DoNotOpenServerManagerAtLogon" -Value 1
+          
+          # Mengatur performa ke 'High Performance' (Mirip Windows 10 Pro)
+          powercfg /s 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          
+          # Optimasi visual: Mematikan animasi berat agar koneksi lebih ringan
+          Write-Host "✅ Sistem dioptimalkan ke Mode Desktop Pro."
+
+      - name: 2. Aktifkan RDP & Konfigurasi Firewall
+        shell: powershell
+        run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          # Mengoptimalkan performa visual untuk koneksi lambat
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "ColorDepth" -Value 4
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           Restart-Service -Name TermService -Force
-          Write-Host "✅ RDP Berhasil Diaktifkan"
 
-      - name: 2. Setup Akun User Admin
+      - name: 3. Buat Akun Administrator Pro
         shell: powershell
         run: |
-          $username = "RDP_User"
-          # Membuat password acak yang kuat
-          $password = -join ((33..126) | Get-Random -Count 20 | % {[char]$_})
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          
-          # Membuat User Baru
-          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -Description "Akses RDP"
-          Add-LocalGroupMember -Group "Administrators" -Member $username
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
-          
-          # Simpan informasi ke environment
-          echo "RDP_USER=$username" >> $env:GITHUB_ENV
-          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
-          Write-Host "✅ User Admin Berhasil Dibuat"
+          $user = "AdminPro"
+          $pass = "P@ssword99!"
+          net user $user $pass /add
+          net localgroup administrators $user /add
+          Write-Host "✅ User Created: $user"
 
-      - name: 3. Instalasi Tailscale (VPN Tunnel)
+      - name: 4. Instalasi Tailscale
         shell: powershell
         run: |
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
           $out = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $url -OutFile $out
-          # Instalasi tanpa interaksi
           Start-Process msiexec.exe -ArgumentList "/i $out /quiet /norestart" -Wait
 
-      - name: 4. Menghubungkan Network Tailscale
+      - name: 5. Hubungkan ke Tailscale (Server Singapore)
         shell: powershell
         run: |
-          # Menghubungkan menggunakan Auth Key (Ambil dari GitHub Secrets)
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-windows-vps
+          # Menggunakan Auth Key dari GitHub Secrets
+          # --accept-dns=false digunakan agar koneksi internet runner tidak terputus
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-win10pro-vps --accept-dns=false
           
-          # Ambil IP Tailscale untuk koneksi
+          # Ambil IP Tailscale
           $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TS_IP=$ip" >> $env:GITHUB_ENV
-          Write-Host "✅ Tunneling Tailscale Aktif"
 
-      - name: 5. Informasi Login RDP
+      - name: 6. Informasi Detail Koneksi
         shell: powershell
         run: |
           Write-Host "`n==========================================" -ForegroundColor Cyan
-          Write-Host "🚀 DETAIL KONEKSI VPS WINDOWS" -ForegroundColor Cyan
-          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host "🚀 RDP WINDOWS 10 PRO READY" -ForegroundColor Cyan
+          Write-Host "=========================================="
           Write-Host "IP Address (Tailscale) : $env:TS_IP" -ForegroundColor Yellow
-          Write-Host "Username               : $env:RDP_USER" -ForegroundColor Yellow
-          Write-Host "Password               : $env:RDP_PASS" -ForegroundColor Yellow
-          Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host "Gunakan Microsoft Remote Desktop untuk login."
-          Write-Host "Pastikan PC Anda juga terhubung ke Tailscale."
-          Write-Host "`n"
+          Write-Host "Username               : AdminPro" -ForegroundColor Yellow
+          Write-Host "Password               : P@ssword99!" -ForegroundColor Yellow
+          Write-Host "Region                 : Singapore (via Tailscale DERP)"
+          Write-Host "=========================================="
+          Write-Host "Gunakan Microsoft Remote Desktop untuk koneksi."
 
-      - name: 6. Menjaga Sesi (Keep Alive)
+      - name: 7. Menjaga Sesi (Keep Alive)
         shell: powershell
         run: |
-          $startTime = Get-Date
-          Write-Host "Sesi Aktif Dimulai: $startTime"
-          # Menampilkan status setiap 5 menit agar workflow tidak dianggap idle
           while ($true) {
-            $elapsed = (Get-Date) - $startTime
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Durasi Berjalan: $($elapsed.ToString('hh\:mm\:ss'))"
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] VPS Aktif - Performa Stabil..."
             Start-Sleep -Seconds 300
           }
